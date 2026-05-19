@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Certificate Verifier</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #F0F4F8;
+    color: #1A2E4A;
+    min-height: 100vh;
+    padding-bottom: 60px;
+  }
+
+  header {
+    background: #1A2E4A;
+    padding: 22px 40px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header h1 { color: #C9A84C; font-size: 20px; font-weight: 700; letter-spacing: 0.5px; }
+  header p  { color: #7A90A8; font-size: 12px; margin-top: 2px; }
+
+  .wrap { max-width: 860px; margin: 36px auto; padding: 0 20px; }
+
+  .card {
+    background: white;
+    border-radius: 14px;
+    padding: 32px 36px;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.07);
+    margin-bottom: 24px;
+  }
+  .card h2 {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1A2E4A;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #C9A84C;
+  }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media(max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+
+  .field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    color: #6B7C93;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .field input {
+    width: 100%;
+    padding: 11px 14px;
+    border: 1.5px solid #DDE2EA;
+    border-radius: 9px;
+    font-size: 14px;
+    color: #1A2E4A;
+    transition: border-color 0.2s;
+    background: #FAFBFC;
+  }
+  .field input:focus { outline: none; border-color: #2E5180; background: white; }
+
+  .btn {
+    margin-top: 24px;
+    width: 100%;
+    padding: 14px;
+    background: #1A2E4A;
+    color: #C9A84C;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 0.3px;
+    transition: background 0.2s;
+  }
+  .btn:hover { background: #2E5180; }
+
+  /* Result panel */
+  #result { display: none; }
+
+  .seal-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  #seal-canvas {
+    border-radius: 50%;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.14);
+  }
+
+  .status-box {
+    border-radius: 12px;
+    padding: 20px 24px;
+    text-align: center;
+  }
+  .status-box.ok {
+    background: #EAF9F0;
+    border: 2px solid #27AE60;
+  }
+  .status-box.tampered {
+    background: #FEF0F0;
+    border: 2px solid #E74C3C;
+  }
+  .status-box .icon { font-size: 36px; margin-bottom: 8px; }
+  .status-box .title { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+  .status-box.ok .title    { color: #1B8A4C; }
+  .status-box.tampered .title { color: #C0392B; }
+  .status-box .sub  { font-size: 13px; color: #666; line-height: 1.6; }
+
+  .hash-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    background: #F4F6F8;
+    border-radius: 9px;
+    padding: 12px 16px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .hash-row .label { font-size: 11px; font-weight: 700; color: #6B7C93; min-width: 100px; }
+  .hash-row .val   { font-family: monospace; font-size: 12px; color: #1A2E4A; word-break: break-all; }
+
+  /* How it works */
+  .step { display: flex; gap: 14px; margin-bottom: 14px; align-items: flex-start; }
+  .step-n {
+    min-width: 28px; height: 28px;
+    background: #1A2E4A; color: #C9A84C;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; flex-shrink: 0;
+  }
+  .step-txt { font-size: 13px; color: #444; line-height: 1.7; padding-top: 4px; }
+  .step-txt strong { color: #1A2E4A; }
+
+  .tamper-demo { 
+    background: #FFF8E6; border: 1px solid #F0C060; border-radius: 10px;
+    padding: 16px 20px; font-size: 13px; color: #7A5500; line-height: 1.7;
+  }
+  .tamper-demo strong { color: #5A3D00; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Certificate Verifier</h1>
+    <p>Tamper-evident seal verification — works offline, no database needed</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2>Enter the fields exactly as they appear on the certificate</h2>
+    <div class="grid">
+      <div class="field">
+        <label>Recipient Name</label>
+        <input id="f-recipient" placeholder="e.g. Arjun Sharma" oninput="liveVerify()">
+      </div>
+      <div class="field">
+        <label>Course Name</label>
+        <input id="f-course" placeholder="e.g. Machine Learning Fundamentals" oninput="liveVerify()">
+      </div>
+      <div class="field">
+        <label>Grade</label>
+        <input id="f-grade" placeholder="e.g. A+" oninput="liveVerify()">
+      </div>
+      <div class="field">
+        <label>Issued By</label>
+        <input id="f-issued_by" placeholder="e.g. Chennai Institute of Technology" oninput="liveVerify()">
+      </div>
+      <div class="field">
+        <label>Date (YYYY-MM-DD)</label>
+        <input id="f-date" placeholder="e.g. 2026-05-12" oninput="liveVerify()">
+      </div>
+      <div class="field">
+        <label>Certificate ID (from certificate)</label>
+        <input id="f-certid" placeholder="e.g. 17957AA9711329A0" oninput="liveVerify()">
+      </div>
+    </div>
+    <button class="btn" onclick="verify()">Generate Seal &amp; Verify</button>
+  </div>
+
+  <div class="card" id="result">
+    <h2>Verification Result</h2>
+
+    <div class="seal-wrap">
+      <canvas id="seal-canvas" width="220" height="220"></canvas>
+      <span style="font-size:12px;color:#888">Regenerated seal from fields above</span>
+    </div>
+
+    <div id="status-box" class="status-box"></div>
+
+    <div class="hash-row">
+      <span class="label">Certificate ID</span>
+      <span class="val" id="out-certid">—</span>
+    </div>
+    <div class="hash-row">
+      <span class="label">Full SHA-256</span>
+      <span class="val" id="out-hash">—</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>How tamper detection works</h2>
+    <div class="step">
+      <div class="step-n">1</div>
+      <div class="step-txt">All certificate fields are combined into one string in a fixed, sorted order.</div>
+    </div>
+    <div class="step">
+      <div class="step-n">2</div>
+      <div class="step-txt"><strong>SHA-256</strong> hashes that string into 32 bytes. This is a one-way, avalanche function — changing even one character completely scrambles all 32 output bytes.</div>
+    </div>
+    <div class="step">
+      <div class="step-n">3</div>
+      <div class="step-txt">Those 32 bytes drive every visual property of the seal: background colour, petal count, spoke count, inner star shape, outer dot ring pattern. <strong>Same fields → always the same seal.</strong></div>
+    </div>
+    <div class="step">
+      <div class="step-n">4</div>
+      <div class="step-txt">Anyone can regenerate the seal here and compare visually to the one on the certificate. The Certificate ID is the first 16 hex digits of the hash — a quick numeric check.</div>
+    </div>
+    <div class="step">
+      <div class="step-n">5</div>
+      <div class="step-txt"><strong>To forge a certificate:</strong> you'd have to find different field values that produce the exact same 256-bit hash — a task computationally impossible with SHA-256 (2²⁵⁶ possible outputs).</div>
+    </div>
+
+    <div class="tamper-demo" style="margin-top:20px">
+      <strong>Try it:</strong> Fill in the original fields and verify. Then change the grade from "A+" to "B-" and verify again.
+      The seal will look completely different — different colours, different shape count, different dot pattern.
+      This is what an institution or employer sees when they check a tampered certificate.
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── SHA-256 in pure JavaScript (no server needed — works offline) ──────────
+async function sha256(str) {
+  const buf = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(str)
+  );
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function canonicalString(fields) {
+  // Must match Python: json.dumps(fields, sort_keys=True, ensure_ascii=True)
+  const keys = Object.keys(fields).sort();
+  const parts = keys.map(k => {
+    const v = JSON.stringify(fields[k]);
+    return JSON.stringify(k) + ": " + v;
+  });
+  return "{" + parts.join(", ") + "}";
+}
+
+function getFields() {
+  return {
+    recipient:  document.getElementById("f-recipient").value.trim(),
+    course:     document.getElementById("f-course").value.trim(),
+    grade:      document.getElementById("f-grade").value.trim(),
+    issued_by:  document.getElementById("f-issued_by").value.trim(),
+    date:       document.getElementById("f-date").value.trim(),
+  };
+}
+
+// ── Visual Seal renderer (mirrors Python seal_engine.py exactly) ───────────
+function hslToRgb(h, s, l) {
+  // h, s, l all 0..1; returns [r,g,b] 0..255
+  let r, g, b;
+  if (s === 0) { r = g = b = l; }
+  else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1; if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q-p)*6*t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q-p)*(2/3-t)*6;
+      return p;
+    };
+    const q = l < 0.5 ? l*(1+s) : l+s-l*s;
+    const p = 2*l - q;
+    r = hue2rgb(p, q, h+1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h-1/3);
+  }
+  return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
+}
+
+function drawSeal(canvas, digestBytes) {
+  const ctx  = canvas.getContext("2d");
+  const size = canvas.width;
+  const cx   = size/2, cy = size/2;
+  const R    = size/2 - 6;
+  const d    = digestBytes;
+
+  ctx.clearRect(0, 0, size, size);
+
+  // Decode colours from hash bytes (matches Python exactly)
+  const bgRgb       = hslToRgb(d[0]/255, 0.30, 0.93);
+  const primaryRgb  = hslToRgb(d[3]/255, 0.75, 0.42);
+  const secondaryRgb= hslToRgb(((d[3]+128)%256)/255, 0.60, 0.55);
+  const accentRgb   = hslToRgb(d[5]/255, 0.85, 0.32);
+  const ring3Rgb    = hslToRgb(d[20]/255, 0.55, 0.58);
+  const borderRgb   = hslToRgb(d[22]/255, 0.65, 0.28);
+
+  const rgb = (a, alpha=1) => `rgba(${a[0]},${a[1]},${a[2]},${alpha})`;
+
+  const nPetals  = 4  + (d[6]  % 9);
+  const nPetals2 = 5  + (d[11] % 8);
+  const spokes   = 3  + (d[10] % 6);
+  const starPts  = 3  + (d[21] % 6);
+  const outerSc  = 0.52 + (d[9] /255)*0.18;
+  const innerSc  = 0.24 + (d[8] /255)*0.18;
+  const rot1     = (d[7] /255)*Math.PI;
+  const rot2     = (d[12]/255)*Math.PI;
+  const dotBits  = (d[16]<<24 | d[17]<<16 | d[18]<<8 | d[19]) >>> 0;
+
+  // Clip to circle
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, R+4, 0, 2*Math.PI);
+  ctx.clip();
+
+  // Background disc
+  ctx.beginPath();
+  ctx.arc(cx, cy, R+4, 0, 2*Math.PI);
+  ctx.fillStyle = rgb(bgRgb);
+  ctx.fill();
+
+  // Petal rings
+  const petalRing = (count, radius, col, alpha, rotation) => {
+    for (let i = 0; i < count; i++) {
+      const angle = (2*Math.PI*i/count) + rotation;
+      const px = cx + radius*Math.cos(angle);
+      const py = cy + radius*Math.sin(angle);
+      const pr = radius*0.26;
+      ctx.beginPath();
+      ctx.arc(px, py, pr, 0, 2*Math.PI);
+      ctx.fillStyle = rgb(col, alpha/255);
+      ctx.fill();
+    }
+  };
+  petalRing(nPetals,  R*outerSc,        primaryRgb,   210, rot1);
+  petalRing(nPetals2, R*(outerSc-0.14), secondaryRgb, 180, rot2+0.3);
+
+  // Spokes
+  const lineW = Math.max(1, size/90);
+  for (let i = 0; i < spokes; i++) {
+    const angle = (2*Math.PI*i/spokes) + (d[12]/255);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + R*0.70*Math.cos(angle), cy + R*0.70*Math.sin(angle));
+    ctx.strokeStyle = rgb(primaryRgb, 70/255);
+    ctx.lineWidth = lineW;
+    ctx.stroke();
+  }
+
+  // Inner star
+  ctx.beginPath();
+  for (let i = 0; i < starPts*2; i++) {
+    const angle = (Math.PI*i/starPts) - Math.PI/2;
+    const r = i%2===0 ? R*innerSc*1.4 : R*innerSc*0.55;
+    const px = cx + r*Math.cos(angle);
+    const py = cy + r*Math.sin(angle);
+    i===0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = rgb(ring3Rgb, 225/255);
+  ctx.fill();
+
+  // Dot ring
+  const dotRad = R*0.84;
+  const dotR   = Math.max(2, size/68);
+  for (let bit = 0; bit < 32; bit++) {
+    if (dotBits & (1 << bit)) {
+      const angle = (2*Math.PI*bit/32);
+      const dx = cx + dotRad*Math.cos(angle);
+      const dy = cy + dotRad*Math.sin(angle);
+      ctx.beginPath();
+      ctx.arc(dx, dy, dotR, 0, 2*Math.PI);
+      ctx.fillStyle = rgb(accentRgb, 195/255);
+      ctx.fill();
+    }
+  }
+
+  // Centre dot
+  ctx.beginPath();
+  ctx.arc(cx, cy, R*0.11, 0, 2*Math.PI);
+  ctx.fillStyle = rgb(accentRgb);
+  ctx.fill();
+
+  ctx.restore();
+
+  // Border rings
+  const bw = Math.max(2, size/55);
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, 2*Math.PI);
+  ctx.strokeStyle = rgb(borderRgb, 185/255);
+  ctx.lineWidth = bw;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, R-bw-3, 0, 2*Math.PI);
+  ctx.strokeStyle = rgb(borderRgb, 80/255);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+// ── Main verify function ───────────────────────────────────────────────────
+async function verify() {
+  const fields  = getFields();
+  const certId  = document.getElementById("f-certid").value.trim().toUpperCase();
+  const canon   = JSON.stringify(fields, Object.keys(fields).sort());
+  const hashHex = await sha256(canon);
+  const generatedId = hashHex.substring(0, 16).toUpperCase();
+
+  // Decode hash bytes for seal drawing
+  const digestBytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    digestBytes[i] = parseInt(hashHex.substring(i*2, i*2+2), 16);
+  }
+
+  // Draw seal
+  const sealCanvas = document.getElementById("seal-canvas");
+  drawSeal(sealCanvas, digestBytes);
+
+  // Show result
+  document.getElementById("out-certid").textContent = generatedId;
+  document.getElementById("out-hash").textContent   = hashHex;
+
+  const statusBox = document.getElementById("status-box");
+  const idMatch   = certId === "" || certId === generatedId;
+
+  if (idMatch) {
+    statusBox.className = "status-box ok";
+    statusBox.innerHTML = `
+      <div class="icon">✅</div>
+      <div class="title">Seal generated — Compare visually with the certificate</div>
+      <div class="sub">
+        The seal above must look <strong>identical</strong> to the one printed on the certificate.<br>
+        ${certId ? "Certificate ID matches ✓" : "Enter the Certificate ID for an additional check."}
+      </div>`;
+  } else {
+    statusBox.className = "status-box tampered";
+    statusBox.innerHTML = `
+      <div class="icon">❌</div>
+      <div class="title">Certificate ID mismatch — TAMPERED</div>
+      <div class="sub">
+        The ID you entered (<strong>${certId}</strong>) does not match the ID generated
+        from these fields (<strong>${generatedId}</strong>).<br>
+        One or more fields have been altered. Do <strong>not</strong> accept this certificate.
+      </div>`;
+  }
+
+  document.getElementById("result").style.display = "block";
+  document.getElementById("result").scrollIntoView({ behavior: "smooth" });
+}
+
+function liveVerify() {
+  // Auto-verify after user has filled all required fields
+  const f = getFields();
+  if (f.recipient && f.course && f.grade && f.issued_by && f.date) {
+    verify();
+  }
+}
+</script>
+</body>
+</html>
