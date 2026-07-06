@@ -1,25 +1,31 @@
 """
 run_demo.py
 ===========
-Master demo script — runs everything end to end.
+Master demo script -- runs everything end to end.
 
 Produces:
-  outputs/certificate_original.pdf   ← the real certificate
-  outputs/certificate_tampered.pdf   ← a forged one (grade changed)
-  outputs/seal_comparison.png        ← side-by-side seal diff (the money shot)
+  outputs/certificate_original.pdf   <- the real, ECDSA-signed certificate
+  outputs/certificate_tampered.pdf   <- a forged one (grade changed)
+  outputs/seal_comparison.png        <- side-by-side seal diff (the money shot)
 """
 
 import os, sys
 sys.path.insert(0, os.path.dirname(__file__))
 
-from seal_engine import generate_seal, get_hash_label
+from seal_engine import (
+    generate_seal, get_hash_label, sign_fields, verify_signature,
+    signature_to_base64, ensure_keypair, canonical_string,
+)
 from cert_generator import generate_certificate
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 OUT = os.path.join(os.path.dirname(__file__), "outputs")
 os.makedirs(OUT, exist_ok=True)
 
-# ── Certificate fields ────────────────────────────────────────────────────────
+# -- Load or generate ECDSA keypair --
+private_key, public_jwk, key_path = ensure_keypair()
+
+# -- Certificate fields --
 original_fields = {
     "recipient":  "Arjun Sharma",
     "course":     "Machine Learning Fundamentals",
@@ -33,27 +39,34 @@ original_fields = {
 tampered_fields = {**original_fields, "grade": "B-"}
 
 print("=" * 55)
-print("  Tamper-Evident Certificate System — Demo")
+print("  ECDSA-Signed Tamper-Evident Certificate Demo")
 print("=" * 55)
 
-# ── Step 1: Print hashes ──────────────────────────────────────────────────────
+# -- Step 1: Print hashes and signatures --
 h_orig = get_hash_label(original_fields)
 h_tamp = get_hash_label(tampered_fields)
 
-print(f"\n[1] Hashing fields...")
+sig_orig = sign_fields(original_fields, private_key)
+sig_tamp = sign_fields(tampered_fields, private_key)
+
+print(f"\n[1] Hashing and signing fields...")
 print(f"    Original hash : {h_orig}")
 print(f"    Tampered hash : {h_tamp}")
-print(f"    Match?        : {'YES ✓' if h_orig == h_tamp else 'NO ✗ — seals will look different!'}")
+print(f"    Match?        : {'YES' if h_orig == h_tamp else 'NO -- seals will look different!'}")
 
-# ── Step 2: Generate PDFs ─────────────────────────────────────────────────────
+# Verify: tampered fields against original signature MUST fail
+v_cross = verify_signature(tampered_fields, sig_orig, private_key.public_key())
+print(f"\n    Cross-verify (tampered fields + original sig): {'VALID' if v_cross else 'INVALID (correctly detected!)'}")
+
+# -- Step 2: Generate PDFs --
 print(f"\n[2] Generating certificates...")
 orig_pdf = os.path.join(OUT, "certificate_original.pdf")
 tamp_pdf = os.path.join(OUT, "certificate_tampered.pdf")
 
-generate_certificate(original_fields, orig_pdf)
-generate_certificate(tampered_fields, tamp_pdf)
+generate_certificate(original_fields, orig_pdf, private_key=private_key)
+generate_certificate(tampered_fields, tamp_pdf, private_key=private_key, override_signature=sig_orig)
 
-# ── Step 3: Side-by-side seal comparison image ────────────────────────────────
+# -- Step 3: Side-by-side seal comparison image --
 print(f"\n[3] Building seal comparison image...")
 
 SEAL_PX  = 420
@@ -67,7 +80,7 @@ draw = ImageDraw.Draw(comparison)
 
 # Title bar
 draw.rectangle([0, 0, TOTAL_W, 52], fill=(26, 46, 74))
-draw.text((TOTAL_W // 2, 26), "Tamper-Evident Seal — Visual Comparison",
+draw.text((TOTAL_W // 2, 26), "ECDSA-Signed Tamper-Evident Seal Comparison",
           fill=(201, 168, 76), anchor="mm")
 
 # Generate both seals
@@ -86,7 +99,6 @@ comparison.paste(seal_tamp, (x2, y), seal_tamp)
 label_y = y + SEAL_PX + 14
 
 def centre_text(draw, x, w, y, text, fill, size=15):
-    # Simple manual centring using textlength approximation
     approx_w = len(text) * size * 0.55
     draw.text((x + w // 2 - approx_w // 2, y), text, fill=fill)
 
@@ -94,15 +106,15 @@ def centre_text(draw, x, w, y, text, fill, size=15):
 draw.rectangle([x1, label_y, x1 + SEAL_PX, label_y + 60], fill=(230, 249, 240))
 draw.rectangle([x1, label_y, x1 + SEAL_PX, label_y + 60],
                outline=(39, 174, 96), width=2)
-centre_text(draw, x1, SEAL_PX, label_y + 8,  "✓ ORIGINAL",         (39, 174, 96), 15)
-centre_text(draw, x1, SEAL_PX, label_y + 28, f'Grade: A+',          (30, 80, 50),  12)
-centre_text(draw, x1, SEAL_PX, label_y + 46, f'ID: {h_orig}',       (100, 130, 100), 10)
+centre_text(draw, x1, SEAL_PX, label_y + 8,  "ORIGINAL (ECDSA Valid)",  (39, 174, 96), 14)
+centre_text(draw, x1, SEAL_PX, label_y + 28, f'Grade: A+',              (30, 80, 50),  12)
+centre_text(draw, x1, SEAL_PX, label_y + 46, f'ID: {h_orig}',           (100, 130, 100), 10)
 
 # Tampered label
 draw.rectangle([x2, label_y, x2 + SEAL_PX, label_y + 60], fill=(254, 240, 240))
 draw.rectangle([x2, label_y, x2 + SEAL_PX, label_y + 60],
                outline=(231, 76, 60), width=2)
-centre_text(draw, x2, SEAL_PX, label_y + 8,  "✗ TAMPERED (grade→B-)", (231, 76, 60), 13)
+centre_text(draw, x2, SEAL_PX, label_y + 8,  "TAMPERED (ECDSA Fail)", (231, 76, 60), 14)
 centre_text(draw, x2, SEAL_PX, label_y + 28, f'Grade: B-',             (130, 30, 30), 12)
 centre_text(draw, x2, SEAL_PX, label_y + 46, f'ID: {h_tamp}',          (160, 100, 100), 10)
 
@@ -110,7 +122,7 @@ comparison.save(os.path.join(OUT, "seal_comparison.png"))
 
 print(f"\n{'='*55}")
 print(f"  Done! Files saved to outputs/")
-print(f"  certificate_original.pdf  ← authentic cert")
-print(f"  certificate_tampered.pdf  ← forged cert")
-print(f"  seal_comparison.png       ← visual proof of tamper detection")
+print(f"  certificate_original.pdf  <- authentic, ECDSA-signed")
+print(f"  certificate_tampered.pdf  <- forged (grade changed)")
+print(f"  seal_comparison.png       <- visual proof of tamper detection")
 print(f"{'='*55}\n")
